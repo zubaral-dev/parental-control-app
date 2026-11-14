@@ -1,0 +1,13 @@
+{
+  "name": "parental-control-simulator",
+  "version": "1.0.0",
+  "description": "Android Child Device Simulator for testing Parental Control features",
+  "main": "simulator.js",
+  "type": "module",
+  "scripts": {
+    "start": "node simulator.js"
+  },
+  "dependencies": {
+    "socket.io-client": "^4.8.1"
+  }
+}

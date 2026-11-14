@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>AirParental Child Companion</title>
+  
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="/socket.io/socket.io.js"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      touch-action: manipulation;
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col justify-between p-4 selection:bg-emerald-500 selection:text-black">
+
+  <!-- Stealth / Black Screen Overlay -->
+  <div id="stealth-overlay" class="fixed inset-0 bg-black z-50 hidden flex-col items-center justify-between p-8 text-slate-700">
+    <div class="text-xs font-mono" id="stealth-time">12:00</div>
+    <div class="text-center space-y-2">
+      <div class="w-1.5 h-1.5 rounded-full bg-emerald-500/40 mx-auto animate-pulse"></div>
+      <p class="text-[11px] text-slate-800">Layar siaga pengawasan keselamatan</p>
+    </div>
+    <button onclick="exitStealthMode()" class="text-xs text-slate-700 border border-slate-900 px-4 py-2 rounded-xl">
+      Ketuk untuk Keluar Mode Stealth
+    </button>
+  </div>
+
+  <!-- Header -->
+  <header class="flex items-center justify-between py-2 border-b border-slate-800/80">
+    <div class="flex items-center space-x-2">
+      <div class="w-8 h-8 rounded-lg bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+        <i data-lucide="shield" class="w-5 h-5"></i>
+      </div>
+      <div>
+        <h1 class="font-bold text-sm text-slate-200">AirParental Companion</h1>
+        <p class="text-[10px] text-slate-400" id="device-model-label">Mendeteksi perangkat...</p>
+      </div>
+    </div>
+    <div class="flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-slate-900 border border-slate-800 text-[11px]">
+      <span id="socket-dot" class="w-2 h-2 rounded-full bg-rose-500"></span>
+      <span id="socket-status" class="text-slate-400">Menghubungkan...</span>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="space-y-4 my-auto py-4">
+
+    <!-- Active Stream View / Camera Preview -->
+    <div class="relative bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden aspect-[3/4] max-h-[380px] mx-auto shadow-2xl flex items-center justify-center">
+      
+      <!-- Live Video Element -->
+      <video id="camera-video" playsinline autoplay muted class="w-full h-full object-cover"></video>
+      <canvas id="capture-canvas" class="hidden"></canvas>
+
+      <!-- Overlay Badges -->
+      <div class="absolute top-3 left-3 flex items-center space-x-2">
+        <span class="px-2.5 py-1 rounded-full text-[10px] font-semibold bg-rose-500/80 text-white backdrop-blur flex items-center space-x-1.5">
+          <span class="w-1.5 h-1.5 rounded-full bg-white animate-ping"></span>
+          <span id="lens-badge">KAMERA DEPAN</span>
+        </span>
+        <span id="fps-badge" class="px-2 py-0.5 rounded-full text-[10px] bg-slate-900/80 border border-slate-700/80 text-slate-300">
+          12 FPS
+        </span>
+      </div>
+
+      <!-- Remote Control Indicator -->
+      <div class="absolute bottom-3 inset-x-3 bg-slate-950/80 backdrop-blur-md rounded-2xl p-2.5 border border-slate-800 text-[11px] flex items-center justify-between text-slate-300">
+        <div class="flex items-center space-x-2">
+          <i data-lucide="radio" class="w-4 h-4 text-emerald-400 animate-pulse"></i>
+          <span>Siap streaming ke Orang Tua</span>
+        </div>
+        <button onclick="toggleLocalLens()" class="px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 text-[10px] font-medium flex items-center space-x-1">
+          <i data-lucide="refresh-cw" class="w-3 h-3"></i>
+          <span>Balik Lensa</span>
+        </button>
+      </div>
+
+      <!-- Permission prompt overlay if camera blocked -->
+      <div id="permission-overlay" class="absolute inset-0 bg-slate-950/90 p-6 flex flex-col items-center justify-center text-center space-y-3">
+        <div class="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
+          <i data-lucide="camera" class="w-6 h-6"></i>
+        </div>
+        <h3 class="font-bold text-sm text-slate-200">Izin Akses Kamera Diperlukan</h3>
+        <p class="text-xs text-slate-400 leading-relaxed">
+          Agar orang tua dapat memantau kamera depan dan belakang secara live, izinkan akses kamera pada browser Anda.
+        </p>
+        <button onclick="startCamera()" class="px-4 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-semibold shadow-lg shadow-emerald-600/30">
+          Nyalakan Kamera Sekarang
+        </button>
+      </div>
+
+    </div>
+
+    <!-- Live Telemetry Stats Card -->
+    <div class="grid grid-cols-2 gap-3 text-xs">
+      <div class="p-3 bg-slate-900/60 border border-slate-800/80 rounded-2xl space-y-1">
+        <div class="flex items-center space-x-1.5 text-slate-400 text-[11px]">
+          <i data-lucide="map-pin" class="w-3.5 h-3.5 text-emerald-400"></i>
+          <span>GPS Lokasi HP</span>
+        </div>
+        <div class="font-semibold text-slate-200" id="gps-status-label">Mencari GPS...</div>
+        <div class="text-[10px] text-slate-500" id="gps-coords-label">-</div>
+      </div>
+
+      <div class="p-3 bg-slate-900/60 border border-slate-800/80 rounded-2xl space-y-1">
+        <div class="flex items-center space-x-1.5 text-slate-400 text-[11px]">
+          <i data-lucide="battery" class="w-3.5 h-3.5 text-sky-400"></i>
+          <span>Status Baterai</span>
+        </div>
+        <div class="font-semibold text-slate-200" id="battery-status-label">100%</div>
+        <div class="text-[10px] text-slate-500" id="battery-charging-label">Siaga</div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Bottom Actions -->
+  <footer class="space-y-2 pt-2">
+    <button onclick="enterStealthMode()" class="w-full py-3 px-4 rounded-2xl text-xs font-semibold bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 flex items-center justify-center space-x-2 transition">
+      <i data-lucide="eye-off" class="w-4 h-4 text-emerald-400"></i>
+      <span>Mode Layar Gelap (Stealth AirDroid)</span>
+    </button>
+    <div class="text-[10px] text-slate-500 text-center">
+      ID Perangkat: <span id="device-id-badge" class="font-mono text-slate-400">child-phone-01</span>
+    </div>
+  </footer>
+
+  <script>
+    // State
+    const urlParams = new URLSearchParams(window.location.search);
+    const DEVICE_ID = urlParams.get("id") || "child-phone-01";
+    document.getElementById("device-id-badge").innerText = DEVICE_ID;
+
+    let currentFacingMode = "user"; // 'user' (front) or 'environment' (back)
+    let stream = null;
+    let streamInterval = null;
+    let wakeLock = null;
+
+    // Detect Device Name & Model
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    const isAndroid = /Android/.test(navigator.userAgent);
+    let deviceModel = isIOS ? "Apple iPhone" : (isAndroid ? "Android Phone" : "Mobile Device");
+    document.getElementById("device-model-label").innerText = deviceModel;
+
+    // Connect Socket.io
+    const socket = io({
+      reconnection: true,
+      extraHeaders: {
+        "Bypass-Tunnel-Reminder": "true"
+      }
+    });
+
+    socket.on("connect", () => {
+      document.getElementById("socket-dot").className = "w-2 h-2 rounded-full bg-emerald-400";
+      document.getElementById("socket-status").innerText = "Terhubung";
+
+      socket.emit("register:child", {
+        deviceId: DEVICE_ID,
+        name: `${deviceModel} (Live)`,
+        model: navigator.userAgent.split("(")[1]?.split(")")[0] || deviceModel,
+        isIOS
+      });
+
+      // Keep screen awake if supported
+      requestWakeLock();
+      // Start GPS
+      startGpsTracking();
+      // Read battery
+      initBattery();
+    });
+
+    socket.on("disconnect", () => {
+      document.getElementById("socket-dot").className = "w-2 h-2 rounded-full bg-rose-500";
+      document.getElementById("socket-status").innerText = "Terputus";
+    });
+
+    // Parent Remote Commands
+    socket.on("command:camera_switch_lens", (data) => {
+      console.log("Switch lens command received from parent:", data.facingMode);
+      if (data.facingMode && data.facingMode !== currentFacingMode) {
+        currentFacingMode = data.facingMode;
+        startCamera();
+      }
+    });
+
+    socket.on("command:take_snapshot", () => {
+      console.log("Snapshot command received from parent");
+      takeAndSendSnapshot();
+    });
+
+    socket.on("command:lock", (data) => {
+      if (data.isLocked) {
+        enterStealthMode();
+      }
+    });
+
+    // Start Camera Stream
+    async function startCamera() {
+      try {
+        if (stream) {
+          stream.getTracks().forEach(track => track.stop());
+        }
+
+        const constraints = {
+          video: {
+            facingMode: { ideal: currentFacingMode },
+            width: { ideal: 640 },
+            height: { ideal: 480 }
+          },
+          audio: false
+        };
+
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        const video = document.getElementById("camera-video");
+        video.srcObject = stream;
+        video.onloadedmetadata = () => {
+          video.play();
+        };
+
+        document.getElementById("permission-overlay").classList.add("hidden");
+        document.getElementById("lens-badge").innerText = currentFacingMode === "user" ? "KAMERA DEPAN" : "KAMERA BELAKANG";
+
+        startFrameStreaming();
+      } catch (err) {
+        console.error("Camera access error:", err);
+        alert("Gagal mengakses kamera: " + err.message + "\nPastikan Anda membuka tautan HTTPS dan mengizinkan izin kamera.");
+      }
+    }
+
+    function toggleLocalLens() {
+      currentFacingMode = currentFacingMode === "user" ? "environment" : "user";
+      startCamera();
+    }
+
+    // Capture and Stream frames
+    function startFrameStreaming() {
+      if (streamInterval) clearInterval(streamInterval);
+
+      const video = document.getElementById("camera-video");
+      const canvas = document.getElementById("capture-canvas");
+      const ctx = canvas.getContext("2d");
+
+      // Stream frames at ~10 FPS for optimal performance & responsiveness
+      streamInterval = setInterval(() => {
+        if (!video.videoWidth) return;
+
+        canvas.width = 360;
+        canvas.height = Math.round((video.videoHeight / video.videoWidth) * 360);
+
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const base64Data = canvas.toDataURL("image/jpeg", 0.6); // 60% quality JPEG
+
+        socket.emit("child:camera_frame", {
+          deviceId: DEVICE_ID,
+          frame: base64Data,
+          facingMode: currentFacingMode
+        });
+      }, 100);
+    }
+
+    function takeAndSendSnapshot() {
+      const video = document.getElementById("camera-video");
+      const canvas = document.getElementById("capture-canvas");
+      const ctx = canvas.getContext("2d");
+
+      if (video.videoWidth) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const photoUrl = canvas.toDataURL("image/jpeg", 0.9);
+
+        socket.emit("child:snapshot_taken", {
+          deviceId: DEVICE_ID,
+          photoUrl
+        });
+      }
+    }
+
+    // Real GPS Tracking
+    function startGpsTracking() {
+      if (!navigator.geolocation) {
+        document.getElementById("gps-status-label").innerText = "Tidak Didukung";
+        return;
+      }
+
+      navigator.geolocation.watchPosition(
+        (pos) => {
+          const { latitude, longitude, accuracy, speed } = pos.coords;
+          document.getElementById("gps-status-label").innerText = `Akurasi ±${Math.round(accuracy)}m`;
+          document.getElementById("gps-coords-label").innerText = `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
+
+          socket.emit("child:location_update", {
+            deviceId: DEVICE_ID,
+            latitude,
+            longitude,
+            accuracy,
+            speed: speed || 0,
+            address: "Lokasi GPS HP Nyata"
+          });
+        },
+        (err) => {
+          console.warn("GPS error:", err.message);
+          document.getElementById("gps-status-label").innerText = "Izin Ditolak";
+        },
+        { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
+      );
+    }
+
+    // Battery API
+    async function initBattery() {
+      if (navigator.getBattery) {
+        try {
+          const battery = await navigator.getBattery();
+          const update = () => {
+            const level = Math.round(battery.level * 100);
+            document.getElementById("battery-status-label").innerText = `${level}%`;
+            document.getElementById("battery-charging-label").innerText = battery.charging ? "Mengisi Daya ⚡" : "Daya Baterai";
+            socket.emit("child:app_stats", {
+              deviceId: DEVICE_ID,
+              battery: level,
+              isCharging: battery.charging
+            });
+          };
+          battery.addEventListener("levelchange", update);
+          battery.addEventListener("chargingchange", update);
+          update();
+        } catch (e) {}
+      }
+    }
+
+    // Wake Lock to prevent phone screen from sleeping
+    async function requestWakeLock() {
+      if ('wakeLock' in navigator) {
+        try {
+          wakeLock = await navigator.wakeLock.request('screen');
+        } catch (err) {}
+      }
+    }
+
+    // Stealth / Black Screen Mode
+    function enterStealthMode() {
+      document.getElementById("stealth-overlay").classList.remove("hidden");
+      document.getElementById("stealth-overlay").classList.add("flex");
+      updateStealthClock();
+    }
+
+    function exitStealthMode() {
+      document.getElementById("stealth-overlay").classList.add("hidden");
+      document.getElementById("stealth-overlay").classList.remove("flex");
+    }
+
+    function updateStealthClock() {
+      const now = new Date();
+      document.getElementById("stealth-time").innerText = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+    }
+    setInterval(updateStealthClock, 1000);
+
+    // Initialize icons
+    lucide.createIcons();
+    // Auto-attempt camera
+    startCamera();
+  </script>
+</body>
+</html>
